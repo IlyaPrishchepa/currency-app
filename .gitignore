@@ -1,0 +1,38 @@
+# IntelliJ IDEA
+.idea/
+
+# Кэш и данные индексации
+*.iml
+*.iws
+*.ipr
+out/
+
+# Лог-файлы
+*.log
+
+# Папки с зависимостями для Gradle или Maven
+/.gradle/
+/target/
+/build/
+
+# Папки для зависимостей
+/.idea/libraries
+/.idea/modules.xml
+
+# Игнорировать файлы в папке с артефактами
+*.jar
+*.war
+*.ear
+*.class
+
+# Игнорировать временные файлы, создаваемые в процессе работы IDE
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Для macOS (если разработка идет на macOS)
+.DS_Store
+
+# Для Windows (если разработка идет на Windows)
+Thumbs.db
