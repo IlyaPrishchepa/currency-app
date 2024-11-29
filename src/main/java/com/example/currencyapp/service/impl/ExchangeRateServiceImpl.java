@@ -8,11 +8,10 @@ import com.example.currencyapp.entity.ExchangeRate;
 import com.example.currencyapp.exception.CurrencyNotFoundException;
 import com.example.currencyapp.repository.CurrencyRepository;
 import com.example.currencyapp.repository.ExchangeRateRepository;
-import com.example.currencyapp.service.ExchangeRateCacheService;
+import com.example.currencyapp.cache.ExchangeRateCache;
 import com.example.currencyapp.service.ExchangeRateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -31,19 +30,19 @@ public class ExchangeRateServiceImpl implements ExchangeRateService {
     private final ExchangeRatesClient exchangeRatesClient;
     private final CurrencyRepository currencyRepository;
     private final ExchangeRateRepository exchangeRateRepository;
-    private final ExchangeRateCacheService cacheService;
+    private final ExchangeRateCache cache;
 
     @Override
     public List<ExchangeRateDto> getExchangeRates(String baseCurrencyCode) {
         String baseCodeUpperCase = baseCurrencyCode.toUpperCase();
 
-        if (!cacheService.hasRates(baseCodeUpperCase)) {
+        if (!cache.hasRates(baseCodeUpperCase)) {
             log.info("Rates for {} not found in memory. Checking the database...", baseCodeUpperCase);
             Map<String, BigDecimal> ratesMap = loadRatesAndUpdateCache(baseCodeUpperCase);
-            cacheService.updateRates(baseCodeUpperCase, ratesMap);
+            cache.updateRates(baseCodeUpperCase, ratesMap);
         }
 
-        Map<String, BigDecimal> rates = cacheService.getRatesForCurrency(baseCodeUpperCase);
+        Map<String, BigDecimal> rates = cache.getRatesForCurrency(baseCodeUpperCase);
         return rates.entrySet().stream()
                 .map(entry -> new ExchangeRateDto(
                         baseCodeUpperCase,
@@ -53,10 +52,8 @@ public class ExchangeRateServiceImpl implements ExchangeRateService {
                 .collect(Collectors.toList());
     }
 
-    @Scheduled(fixedRateString = "${scheduler.update-rates.interval}")
+    @Override
     public void updateAllExchangeRates() {
-        log.info("Scheduled task: Updating exchange rates for all currencies...");
-
         if (currencyRepository.count() == 0) {
             log.warn("No currencies found in the database. Skipping scheduled update.");
             return;
@@ -84,7 +81,7 @@ public class ExchangeRateServiceImpl implements ExchangeRateService {
                     List<ExchangeRate> rates = exchangeRateRepository.findByCurrency(currency);
                     Map<String, BigDecimal> rateMap = rates.stream()
                             .collect(Collectors.toMap(ExchangeRate::getCode, ExchangeRate::getRate));
-                    cacheService.updateRates(currencyCode, rateMap);
+                    cache.updateRates(currencyCode, rateMap);
                     return rateMap;
                 })
                 .orElseThrow(() -> new CurrencyNotFoundException("Rates for " + currencyCode + " not found."));
@@ -99,7 +96,7 @@ public class ExchangeRateServiceImpl implements ExchangeRateService {
 
         List<ExchangeRate> exchangeRates = mapApiResponseToEntities(baseCurrency, response.getRates());
         exchangeRateRepository.saveAll(exchangeRates);
-        cacheService.updateRates(baseCurrencyCode, response.getRates());
+        cache.updateRates(baseCurrencyCode, response.getRates());
     }
 
     private ExchangeRateResponse fetchRatesFromApi(String currencyCode) {

@@ -52,7 +52,7 @@ public class CurrencyController {
             @ApiResponse(responseCode = "500", description = "Internal Server Error")
     })
     @GetMapping("/{currencyCode}/rates")
-    public ResponseEntity<List<ExchangeRateDto>> getExchangeRates(@PathVariable String currencyCode) {
+    public ResponseEntity<List<ExchangeRateDto>> getExchangeRateByCode(@PathVariable String currencyCode) {
         List<ExchangeRateDto> rates = exchangeRateService.getExchangeRates(currencyCode);
         return ResponseEntity.ok(rates);
     }

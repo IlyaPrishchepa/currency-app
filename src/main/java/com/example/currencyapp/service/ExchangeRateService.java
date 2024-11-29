@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface ExchangeRateService {
     List<ExchangeRateDto> getExchangeRates(String baseCurrencyCode);
+    void updateAllExchangeRates();
 }

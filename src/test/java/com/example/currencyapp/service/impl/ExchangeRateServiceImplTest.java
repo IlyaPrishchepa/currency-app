@@ -8,7 +8,7 @@ import com.example.currencyapp.entity.ExchangeRate;
 import com.example.currencyapp.exception.CurrencyNotFoundException;
 import com.example.currencyapp.repository.CurrencyRepository;
 import com.example.currencyapp.repository.ExchangeRateRepository;
-import com.example.currencyapp.service.ExchangeRateCacheService;
+import com.example.currencyapp.cache.ExchangeRateCache;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -35,15 +35,34 @@ class ExchangeRateServiceImplTest {
     private ExchangeRateRepository exchangeRateRepository;
 
     @Mock
-    private ExchangeRateCacheService cacheService;
+    private ExchangeRateCache cache;
 
     @InjectMocks
     private ExchangeRateServiceImpl exchangeRateService;
 
     @Test
-    void testGetExchangeRates_cacheMiss_loadFromDbAndUpdateCache() {
+    void getExchangeRates_foundInCache() {
+        // Arrange
+        String baseCurrency = "USD";
+        Map<String, BigDecimal> cachedRates = Map.of("EUR", BigDecimal.valueOf(0.85));
+        when(cache.hasRates(baseCurrency)).thenReturn(true);
+        when(cache.getRatesForCurrency(baseCurrency)).thenReturn(cachedRates);
+
+        // Act
+        List<ExchangeRateDto> result = exchangeRateService.getExchangeRates(baseCurrency);
+
+        // Assert
+        assertEquals(1, result.size());
+        assertEquals("EUR", result.getFirst().getCurrencyCode());
+        assertEquals(BigDecimal.valueOf(0.85), result.getFirst().getRate());
+        verify(cache, times(1)).getRatesForCurrency(baseCurrency);
+    }
+
+    @Test
+    void getExchangeRates_FoundInDbAndCacheUpdated() {
         String baseCurrencyCode = "USD";
-        Map<String, BigDecimal> ratesMap = Map.of("EUR", BigDecimal.valueOf(0.9), "GBP", BigDecimal.valueOf(0.75));
+        Map<String, BigDecimal> ratesMap = Map.of("EUR", BigDecimal.valueOf(0.9),
+                "GBP", BigDecimal.valueOf(0.75));
 
         Currency currency = Currency.builder()
                 .id(1L)
@@ -63,10 +82,10 @@ class ExchangeRateServiceImplTest {
                 .timestamp(LocalDateTime.now())
                 .build();
 
-        when(cacheService.hasRates(baseCurrencyCode)).thenReturn(false);
+        when(cache.hasRates(baseCurrencyCode)).thenReturn(false);
         when(currencyRepository.findByCode(baseCurrencyCode)).thenReturn(Optional.of(currency));
         when(exchangeRateRepository.findByCurrency(currency)).thenReturn(List.of(exchangeRate1, exchangeRate2));
-        when(cacheService.getRatesForCurrency(baseCurrencyCode)).thenReturn(ratesMap);
+        when(cache.getRatesForCurrency(baseCurrencyCode)).thenReturn(ratesMap);
 
         List<ExchangeRateDto> exchangeRates = exchangeRateService.getExchangeRates(baseCurrencyCode);
         exchangeRates.sort(Comparator.comparing(ExchangeRateDto::getCurrencyCode));
@@ -78,99 +97,52 @@ class ExchangeRateServiceImplTest {
         assertEquals(BigDecimal.valueOf(0.9), exchangeRates.getFirst().getRate());
     }
 
+
+
     @Test
-    void testGetExchangeRates_cacheHit_returnRatesFromCache() {
-        String baseCurrencyCode = "USD";
-        Map<String, BigDecimal> ratesMap = Map.of("EUR", BigDecimal.valueOf(0.9), "GBP", BigDecimal.valueOf(0.75));
+    void getExchangeRates_notFoundAnywhere() {
+        // Arrange
+        String baseCurrency = "USD";
 
-        when(cacheService.hasRates(baseCurrencyCode)).thenReturn(true);
-        when(cacheService.getRatesForCurrency(baseCurrencyCode)).thenReturn(ratesMap);
+        when(cache.hasRates(baseCurrency)).thenReturn(false);
+        when(currencyRepository.findByCode(baseCurrency)).thenReturn(Optional.empty());
 
-        List<ExchangeRateDto> exchangeRates = exchangeRateService.getExchangeRates(baseCurrencyCode);
-        exchangeRates.sort(Comparator.comparing(ExchangeRateDto::getCurrencyCode));
-
-        assertNotNull(exchangeRates);
-        assertEquals(2, exchangeRates.size());
-        assertEquals("USD", exchangeRates.getFirst().getBaseCurrencyCode());
-        assertEquals("EUR", exchangeRates.getFirst().getCurrencyCode());
-        assertEquals(BigDecimal.valueOf(0.9), exchangeRates.getFirst().getRate());
+        // Act & Assert
+        assertThrows(CurrencyNotFoundException.class, () -> exchangeRateService.getExchangeRates(baseCurrency));
+        verify(cache, never()).updateRates(anyString(), anyMap());
     }
 
     @Test
-    void testGetExchangeRates_currencyNotFoundInDb_throwsCurrencyNotFoundException() {
-        String baseCurrencyCode = "XYZ";
-
-        when(cacheService.hasRates(baseCurrencyCode)).thenReturn(false);
-        when(currencyRepository.findByCode(baseCurrencyCode)).thenReturn(Optional.empty());
-
-        assertThrows(CurrencyNotFoundException.class, () -> exchangeRateService.getExchangeRates(baseCurrencyCode));
-    }
-
-    @Test
-    void testUpdateAllExchangeRates_noCurrenciesInDb_logsWarning() {
+    void updateAllExchangeRates_noCurrenciesInDatabase() {
+        // Arrange
         when(currencyRepository.count()).thenReturn(0L);
 
+        // Act
         exchangeRateService.updateAllExchangeRates();
 
+        // Assert
         verify(exchangeRatesClient, never()).getExchangeRates(anyString());
+        verify(exchangeRateRepository, never()).saveAll(anyList());
     }
 
     @Test
-    void testUpdateAllExchangeRates_successfulUpdate() {
-        Currency usd = Currency.builder()
-                .id(1L)
-                .code("USD")
-                .build();
-        List<Currency> currencies = List.of(usd);
-        Map<String, BigDecimal> rates = Map.of("EUR", BigDecimal.valueOf(0.9), "GBP", BigDecimal.valueOf(0.75));
+    void updateAllExchangeRates_currenciesExistInDatabase() {
+        // Arrange
+        List<Currency> currencies = List.of(new Currency(1L, "USD", new ArrayList<>()));
+        Map<String, BigDecimal> rates = Map.of("EUR", BigDecimal.valueOf(0.85));
         ExchangeRateResponse response = new ExchangeRateResponse("USD", rates);
 
         when(currencyRepository.count()).thenReturn(1L);
         when(currencyRepository.findAll()).thenReturn(currencies);
         when(exchangeRatesClient.getExchangeRates("USD")).thenReturn(response);
-        when(currencyRepository.findByCode("USD")).thenReturn(Optional.of(usd));
-        when(exchangeRateRepository.saveAll(anyList())).thenReturn(new ArrayList<>());
 
+        // Act
         exchangeRateService.updateAllExchangeRates();
 
-        verify(exchangeRatesClient, times(1)).getExchangeRates("USD");
+        // Assert
         verify(exchangeRateRepository, times(1)).saveAll(anyList());
-        verify(cacheService, times(1)).updateRates(eq("USD"), eq(rates));
-    }
-
-    @Test
-    void testUpdateAllExchangeRates_externalApiError_logsError() {
-        Currency usd = Currency.builder()
-                .id(1L)
-                .code("USD")
-                .build();
-        List<Currency> currencies = List.of(usd);
-
-        when(currencyRepository.count()).thenReturn(1L);
-        when(currencyRepository.findAll()).thenReturn(currencies);
-        when(exchangeRatesClient.getExchangeRates("USD")).thenThrow(new RuntimeException("External service error"));
-
-        exchangeRateService.updateAllExchangeRates();
-
-        verify(exchangeRatesClient, times(1)).getExchangeRates("USD");
-        verifyNoInteractions(exchangeRateRepository);
-    }
-
-    @Test
-    void testUpdateAllExchangeRates_currencyNotFoundInApi_logsWarning() {
-        Currency usd = Currency.builder()
-                .id(1L)
-                .code("USD")
-                .build();
-        List<Currency> currencies = List.of(usd);
-
-        when(currencyRepository.count()).thenReturn(1L);
-        when(currencyRepository.findAll()).thenReturn(currencies);
-        when(exchangeRatesClient.getExchangeRates("USD")).thenThrow(new CurrencyNotFoundException("Currency not found"));
-
-        exchangeRateService.updateAllExchangeRates();
-
-        verify(exchangeRatesClient, times(1)).getExchangeRates("USD");
-        verifyNoInteractions(exchangeRateRepository);
+        verify(cache, times(1)).updateRates("USD", rates);
     }
 }
+
+

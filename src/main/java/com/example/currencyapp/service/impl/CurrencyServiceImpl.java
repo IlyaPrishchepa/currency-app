@@ -10,7 +10,7 @@ import com.example.currencyapp.exception.CurrencyNotFoundException;
 import com.example.currencyapp.repository.CurrencyRepository;
 import com.example.currencyapp.repository.ExchangeRateRepository;
 import com.example.currencyapp.service.CurrencyService;
-import com.example.currencyapp.service.ExchangeRateCacheService;
+import com.example.currencyapp.cache.ExchangeRateCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,11 +30,11 @@ public class CurrencyServiceImpl implements CurrencyService {
     private final CurrencyRepository currencyRepository;
     private final ExchangeRateRepository exchangeRateRepository;
     private final ExchangeRatesClient exchangeRatesClient;
-    private final ExchangeRateCacheService cacheService;
+    private final ExchangeRateCache cache;
 
     @Override
     public List<CurrencyDto> getAllCurrencies() {
-        if (cacheServiceHasCachedRates()) {
+        if (!cache.isEmpty()) {
             return getCurrenciesFromCache();
         }
 
@@ -53,19 +53,14 @@ public class CurrencyServiceImpl implements CurrencyService {
 
         ExchangeRateResponse response = fetchExchangeRatesFromApi(upperCurrencyCode);
         saveCurrencyAndExchangeRates(upperCurrencyCode, response.getRates());
-        cacheService.updateRates(upperCurrencyCode, response.getRates());
+        cache.updateRates(upperCurrencyCode, response.getRates());
 
         log.info("Currency {} successfully added.", upperCurrencyCode);
     }
 
-    private boolean cacheServiceHasCachedRates() {
-        Map<String, Map<String, BigDecimal>> cachedRates = cacheService.getAllRates();
-        return cachedRates != null && !cachedRates.isEmpty();
-    }
-
     private List<CurrencyDto> getCurrenciesFromCache() {
         log.info("Returning currencies from cache.");
-        return cacheService.getAllRates().keySet().stream()
+        return cache.getAllRates().keySet().stream()
                 .map(CurrencyDto::new)
                 .toList();
     }
@@ -85,7 +80,7 @@ public class CurrencyServiceImpl implements CurrencyService {
             List<ExchangeRate> rates = exchangeRateRepository.findByCurrency(currency);
             Map<String, BigDecimal> rateMap = rates.stream()
                     .collect(Collectors.toMap(ExchangeRate::getCode, ExchangeRate::getRate));
-            cacheService.updateRates(currency.getCode(), rateMap);
+            cache.updateRates(currency.getCode(), rateMap);
         });
     }
 
